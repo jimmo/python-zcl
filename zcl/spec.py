@@ -69,78 +69,195 @@
 #   ENUM16 = 0x31
 #   CHARACTER_STRING = 0x42
 
-PROFILES = {
-  'zigbee': (0x0000,),
-  'ha': (0x0104,),
-  'zll': (0xc05e,),
+import enum
+import struct
+
+class Profile(enum.IntEnum):
+  ZIGBEE = 0x0000
+  HOME_AUTOMATION = 0x0104
+  ZIGBEE_LIGHT_LINK = 0xc05e
+
+
+class Endpoint(enum.IntEnum):
+  ZDO = 0x00
+
+
+class Status(enum.IntEnum):
+  SUCCESS = 0X00
+  FAILURE = 0X01
+  NOT_AUTHORIZED = 0X7E
+  RESERVED_FIELD_NOT_ZERO = 0X7F
+  MALFORMED_COMMAND = 0X80
+  UNSUP_CLUSTER_COMMAND = 0X81
+  UNSUP_GENERAL_COMMAND = 0X82
+  UNSUP_MANUF_CLUSTER_COMMAND = 0X83
+  UNSUP_MANUF_GENERAL_COMMAND = 0X84
+  INVALID_FIELD = 0X85
+  UNSUPPORTED_ATTRIBUTE = 0X86
+  INVALID_VALUE = 0X87
+  INSUFFICIENT_SPACE = 0X89
+  DUPLICATE_EXISTS = 0X8A
+  NOT_FOUND = 0X8B
+  UNREPORTABLE_ATTRIBUTE = 0X8C
+  INVALID_DATA_TYPE = 0X8D
+  INVALID_SELECTOR = 0X8E
+  WRITE_ONLY = 0X8F
+  INCONSISTENT_STARTUP_STATE = 0X90
+  DEFINED_OUT_OF_BAND = 0X91
+  INCONSISTENT = 0X92
+  ACTION_DENIED = 0X93
+  TIMEOUT = 0X94
+  ABORT = 0X95
+  INVALID_IMAGE = 0X96
+  WAIT_FOR_DATA = 0X97
+  NO_IMAGE_AVAILABLE = 0X98
+  REQUIRE_MORE_IMAGE = 0X99
+  NOTIFICATION_PENDING = 0X9A
+  HARDWARE_FAILURE = 0XC0
+  SOFTWARE_FAILURE = 0XC1
+  CALIBRATION_ERROR = 0XC2
+  UNSUPPORTED_CLUSTER = 0XC3
+
+
+ZDO_BY_NAME = {
+  # Zigbee Spec -- "2.4.3.1.5 Simple_Desc_req"
+  'simple_desc': (0x0004, ('addr16:uint16', 'endpoint:uint8',),),
+  # Zigbee Spec -- "2.4.4.1.5 Simple_Desc_resp"
+  'simple_desc_resp': (0x8004, ('status:enum8:success,invalid_ep,not_active,device_not_found,inv_requesttype,no_descriptor', 'addr16:uint16', 'b_simple_descriptors:uint8', 'simple_descriptors:#simple_descriptor',),),
+  #  Zigbee Spec -- "2.4.3.1.6 Active_EP_req"
+  'active_ep': (0x0005, ('addr16:uint16',),),
+  #  Zigbee Spec -- "2.4.4.1.6 Active_EP_resp"
+  'active_ep_resp': (0x8005, ('status:enum8:success,device_not_found,inv_requesttype,no_descriptor', 'addr16:uint16', 'n_active_eps:uint8', 'active_eps:*uint8',),),
+  #  Zigbee Spec -- "2.4.3.1.7 Match_Desc_req"
+  'match_desc': (0x0006, ('addr16:uint16', 'profile:uint16', 'n_in_clusters:uint8', 'in_clusters:*uint16', 'n_out_clusters:uint8', 'out_clusters:*uint16',),),
+  #  Zigbee Spec -- "2.4.4.1.7 Match_Desc_resp"
+  'match_desc_resp': (0x8006, ('status:enum8:success,device_not_found,inv_requesttype,no_descriptor', 'addr16:uint16', 'n_match_list:uint8', 'match_list:*uint8',),),
+  # Zigbee Spec -- "2.4.3.2.2 Bind_req"
+  'bind': (0x0021, ('src_addr:uint64', 'src_ep:uint8', 'cluster:uint16', 'dst_addr_mode:enum8:_,addr16,_,addr64', 'dst_addr:uint64', 'dst_ep:uint8',),),
+  # Zigbee Spec -- "2.4.3.2.3 Unbind_req"
+  'unbind': (0x0022, ('src_addr:uint64', 'src_ep:uint8', 'cluster:uint16', 'dst_addr_mode:enum8:_,addr16,_,addr64', 'dst_addr:uint64', 'dst_ep:uint8',),),
+  # Zigbee Spec -- "2.4.4.2.2 Bind_resp"
+  'bind_resp': (0x8021, ('status:enum8:success,not_supported,invalid_ep,table_full,not_authorized',),),
+  # Zigbee Spec -- "2.4.4.2.3 Unbind_resp"
+  'unbind_resp': (0x8022, ('status:enum8:success,not_supported,invalid_ep,table_full,not_authorized',),),
+  #  Spec -- "2.4.3.1.11 Device_annce"
+  'device_annce': (0x0013,  ('addr16:uint16', 'addr64:uint64', 'capability:uint8'),),  # See Figure 2.17
+  # Zigbee Spec -- "2.4.4.3.9 Mgmt_NWK_Update_notify"
+  'mgmt_nwk_update_notify': (0x8038, ('status:uint8', 'scanned_channels:uint32', 'total_transmissions:uint16', 'transmisson_failures:uint16', 'n_energy_values:uint8', 'energy_values:*uint8',),),
 }
 
-STATUS = {
-  'success': 0x00,
-  'failure': 0x01,
-  'not_authorized': 0x7e,
-  'reserved_field_not_zero': 0x7f,
-  'malformed_command': 0x80,
-  'unsup_cluster_command': 0x81,
-  'unsup_general_command': 0x82,
-  'unsup_manuf_cluster_command': 0x83,
-  'unsup_manuf_general_command': 0x84,
-  'invalid_field': 0x85,
-  'unsupported_attribute': 0x86,
-  'invalid_value': 0x87,
-  'insufficient_space': 0x89,
-  'duplicate_exists': 0x8a,
-  'not_found': 0x8b,
-  'unreportable_attribute': 0x8c,
-  'invalid_data_type': 0x8d,
-  'invalid_selector': 0x8e,
-  'write_only': 0x8f,
-  'inconsistent_startup_state': 0x90,
-  'defined_out_of_band': 0x91,
-  'inconsistent': 0x92,
-  'action_denied': 0x93,
-  'timeout': 0x94,
-  'abort': 0x95,
-  'invalid_image': 0x96,
-  'wait_for_data': 0x97,
-  'no_image_available': 0x98,
-  'require_more_image': 0x99,
-  'notification_pending': 0x9a,
-  'hardware_failure': 0xc0,
-  'software_failure': 0xc1,
-  'calibration_error': 0xc2,
-  'unsupported_cluster': 0xc3,
+
+ZDO_BY_ID = {
+  cluster: (name, args) for name, (cluster, args) in ZDO_BY_NAME.items()
 }
 
-ZDO = {
-    # Zigbee Spec -- "2.4.3.1.5 Simple_Desc_req"
-    'simple_desc': (0x0004, ('addr16:uint16', 'endpoint:uint8',),),
-    # Zigbee Spec -- "2.4.4.1.5 Simple_Desc_resp"
-    'simple_desc_resp': (0x8004, ('status:enum8:success,invalid_ep,not_active,device_not_found,inv_requesttype,no_descriptor', 'addr16:uint16', 'length:uint8', 'simple_descriptor:*simple_descriptor',),),
-    #  Zigbee Spec -- "2.4.3.1.6 Active_EP_req"
-    'active_ep': (0x0005, ('addr16:uint16',),),
-    #  Zigbee Spec -- "2.4.4.1.6 Active_EP_resp"
-    'active_ep_resp': (0x8005, ('status:enum8:success,device_not_found,inv_requesttype,no_descriptor', 'addr16:uint16', 'active_ep_count:uint8', 'active_eps:*uint8',),),
-    #  Zigbee Spec -- "2.4.3.1.7 Match_Desc_req"
-    'match_desc': (0x0006, ('addr16:uint16', 'profile:uint16', 'num_in_clusters:uint8', 'in_clusters:*uint16', 'num_out_clusters:uint8', 'out_clusters:*uint16',),),
-    #  Zigbee Spec -- "2.4.4.1.7 Match_Desc_resp"
-    'match_desc_resp': (0x8006, ('status:enum8:success,device_not_found,inv_requesttype,no_descriptor', 'addr16:uint16', 'match_length:uint8', 'match_list:*uint8',),),
-    # Zigbee Spec -- "2.4.3.2.2 Bind_req"
-    'bind': (0x0021, ('src_addr:uint64', 'src_ep:uint8', 'cluster:uint16', 'dst_addr_mode:enum8:_,addr16,_,addr64', 'dst_addr:uint64', 'dst_ep:uint8',),),
-    # Zigbee Spec -- "2.4.3.2.3 Unbind_req"
-    'unbind': (0x0022, ('src_addr:uint64', 'src_ep:uint8', 'cluster:uint16', 'dst_addr_mode:enum8:_,addr16,_,addr64', 'dst_addr:uint64', 'dst_ep:uint8',),),
-    # Zigbee Spec -- "2.4.4.2.2 Bind_resp"
-    'bind_resp': (0x8021, ('status:enum8:success,not_supported,invalid_ep,table_full,not_authorized',),),
-    # Zigbee Spec -- "2.4.4.2.3 Unbind_resp"
-    'bind_resp': (0x8022, ('status:enum8:success,not_supported,invalid_ep,table_full,not_authorized',),),
-    #  Spec -- "2.4.3.1.11 Device_annce"
-    'device_annce': (0x0013,  ('addr16:uint16', 'addr64:uint64', 'capability:uint8'),),  # See Figure 2.17
-    # Zigbee Spec -- "2.4.4.3.9 Mgmt_NWK_Update_notify"
-    'mgmt_nwk_update_notify': (0x8038, ('status:uint8', 'scanned_channels:uint32', 'total_transmissions:uint16', 'transmisson_failures:uint16', 'scanned_channels_list_count:uint8', 'energy_values:*uint8',),),
+
+def _decode_helper(args, data, i=0):
+  kwargs = {}
+
+  n = 1
+  b = 0
+
+  for arg in args:
+    arg = arg.split(':')
+    name, datatype = arg[0], arg[1],
+
+    v = None
+
+    info = STRUCT_TYPES[datatype.strip('*#')]
+    if not callable(info):
+      fmt, nbytes, = info
+      info = lambda dd, ii: (struct.unpack(fmt, dd[ii:ii + nbytes])[0], ii + nbytes,)
+
+    if datatype.startswith('*'):
+      v = []
+      for _i in range(n):
+        x, i = info(data, i)
+        v.append(x)
+    elif datatype.startswith('#'):
+      v = []
+      ii = i + b
+      while i < ii:
+        x, i = info(data, i)
+        v.append(x)
+    else:
+      v, i = info(data, i)
+
+    if name.startswith('n_'):
+      n = v
+    elif name.startswith('b_'):
+      b = v
+    else:
+      kwargs[name] = v
+      n = 1
+      b = 0
+
+  return kwargs, i
+
+
+def _parse_simple_descriptor(data, i):
+  return _decode_helper(('endpoint:uint8', 'profile:uint16', 'device_identifier:uint16', 'device_version:uint8', 'n_in_clusters:uint8', 'in_clusters:*uint16', 'n_out_clusters:uint8', 'out_clusters:*uint16',), data, i)
+
+
+STRUCT_TYPES = {
+  'uint8': ('<B', 1,),
+  'uint16': ('<H', 2,),
+  'uint32': ('<I', 4,),
+  'uint64': ('<Q', 8,),
+  'int8': ('<b', 1,),
+  'int16': ('<h', 2,),
+  'int32': ('<i', 4,),
+  'int64': ('<q', 8,),
+  'enum8': ('<B', 1,),
+  'simple_descriptor': _parse_simple_descriptor,
 }
 
-PROFILE_COMMANDS = {
-  # ZCL Spec -- "2.4 General Command Frames"
+
+def decode_zdo(cluster, data):
+  if cluster not in ZDO_BY_ID:
+    raise ValueError('Unknown ZDO 0x{:04x}'.format(cluster))
+
+  #print([hex(b) for b in data])
+
+  cluster_name, args = ZDO_BY_ID[cluster]
+
+  seq, = struct.unpack('<B', data[:1])
+  data = data[1:]
+
+  kwargs, _nbytes =_decode_helper(args, data)
+
+  return cluster_name, seq, kwargs
+
+
+def _encode_helper(args, kwargs):
+  data = bytes()
+
+  for arg in args:
+    arg = arg.split(':')
+    name, datatype = arg[0], arg[1],
+
+    if name.startswith('n_') or datatype.startswith('*'):
+      raise ValueError('Unhandled list for "{}"'.format(arg))
+
+    fmt, _nbytes, = STRUCT_TYPES[datatype]
+    data += struct.pack(fmt, kwargs[name])
+
+  return data
+
+
+def encode_zdo(cluster_name, seq, **kwargs):
+  if cluster_name not in ZDO_BY_NAME:
+    raise ValueError('Unknown ZDO "{}"'.format(cluster_name))
+
+  cluster, args = ZDO_BY_NAME[cluster_name]
+
+  data = struct.pack('<B', seq) + _encode_helper(args, kwargs)
+
+  return cluster, data
+
+
+PROFILE_COMMANDS_BY_NAME = {
+  # ZCL Spec -- "2.5 General Command Frames"
   'read_attributes': (0x00, ('*uint16',),),
   'read_attributes_response': (0x01, ('*read_attr_status',),),
   'write_attributes': (0x02, ('*write_attr',),),
@@ -152,7 +269,7 @@ PROFILE_COMMANDS = {
   # 'read_reporting_configuration': (0x08, (),),
   # 'read_reporting_configuration_response': (0x09, (),),
   # 'report_attributes': (0x0a, (),),
-  # 'default_response': (0x0b, (),),
+  'default_response': (0x0b, ('command:uint8', 'status:uint8',),),
   # 'discover_attributes': (0x0c, (),),
   # 'discover_attributes_response': (0x0d, (),),
   # 'read_attributes_structured': (0x0e, (),),
@@ -160,7 +277,13 @@ PROFILE_COMMANDS = {
   # 'write_attributes_structured_response': (0x10, (),),
 }
 
-CLUSTERS = {
+
+PROFILE_COMMANDS_BY_ID = {
+  command: (command_name, args) for command_name, (command, args) in PROFILE_COMMANDS_BY_NAME
+}
+
+
+CLUSTERS_BY_NAME = {
   # ZCL Spec -- Chapter 3 -- General
   'basic': (0x0000, {
     'reset': (0x00, (),),
@@ -292,42 +415,69 @@ CLUSTERS = {
   },),
 }
 
-ZDO_ENDPOINT = 0x00
 
-# class FrameControl(IntEnum):
-#   # ZCL Spec - "2.3.1.1 Frame Control Field"
-
-#   # 0 == entire profile, 1 == cluster specific.
-#   FRAME_TYPE_MASK = 1 << 0
-#   FRAME_TYPE_PROFILE_COMMAND = 0
-#   FRAME_TYPE_CLUSTER_COMMAND = 1 << 0
-
-#   # Is this a manufacturer-specific frame?
-#   MANUFACTURER_SPECIFIC_MASK = 1 << 2
-#   MANUFACTURER_SPECIFIC = 1 << 2
-
-#   # Direction (0 == client to server 1 == server to client).
-#   DIRECTION_MASK = 1 << 3
-#   DIRECTION_CLIENT_TO_SERVER = 0
-#   DIRECTION_SERVER_TO_CLIENT = 1
-
-#   # Disable the default response (1 == only default response if error).
-#   DISABLE_DEFAULT_RESPONSE_MASK = 1 << 4
+CLUSTERS_BY_ID = {}
+for cluster_name, (cluster, rx_commands, tx_commands, attributes,) in CLUSTERS_BY_NAME.items():
+  CLUSTERS_BY_ID[cluster] = (
+    cluster_name,
+    {
+      command: (command_name, args) for command_name, (command, args) in rx_commands.items()
+    },
+    {
+      command: (command_name, args) for command_name, (command, args) in tx_commands.items()
+    },
+    {
+      attribute: (attribute_name, datatype) for attribute_name, (attribute, datatype) in attributes.items()
+    }
+  )
 
 
-# class Status(IntEnum):
-#   SUCCESS = 0x00
-#print(ZCL_SPEC)
+def decode_zcl(cluster, data):
+  frame_control, = struct.unpack('<B', data[:1])
+  frame_type = not not (frame_control & 1)
+  direction = not not (frame_control & (1 << 3))
+  manufacturer_specific = not not (frame_control & (1 << 4))
+
+  if manufacturer_specific:
+    manufacturer_code, seq, command = struct.unpack('<HBB', data[1:5])
+  else:
+    manufacturer_code = 0
+    seq, command = struct.unpack('<BB', data[1:3])
+
+  cluster_name, rx_commands, tx_commands, attributes = CLUSTERS_BY_ID[cluster]
+  if frame_control == 0:
+    # Profile command
+    pass
+  else:
+    # Cluster command
+
+  return None
 
 
-for profile_name, (profile_id,) in PROFILES.items():
-  print('{} (0x{:04x})'.format(profile_name, profile_id))
+def encode_cluster_command(cluster_name, command_name, seq, direction=0, default_response=True, manufacturer_code=None, **kwargs):
+  if cluster_name not in CLUSTERS_BY_NAME:
+    raise ValueError('Unknown cluster "{}"'.format(cluster_name))
 
-for cluster_name, (cluster_id, rx, tx, attrs) in CLUSTERS.items():
-  print('  {} (0x{:04x})'.format(cluster_name, cluster_id))
-  if rx:
-    print('    rx:    {}'.format(', '.join(rx.keys())))
-  if tx:
-    print('    tx:    {}'.format(', '.join(tx.keys())))
-  if attrs:
-    print('    attrs: {}'.format(', '.join(attrs.keys())))
+  cluster, rx_commands, tx_commands, attributes = CLUSTERS_BY_NAME[cluster_name]
+
+  if command_name not in rx_commands:
+    raise ValueError('Unknown command "{}"'.format(command_name))
+
+  command, args = rx_commands[command_name]
+
+  # ZCL Spec - "2.1.1.1 Frame Control Field"
+  frame_control = 1  # Cluster command
+  if direction:
+    frame_control |= 1 << 3
+  if not default_response:
+    frame_control |= 1 << 4
+
+  if manufacturer_code is not None:
+    frame_control |= 1 << 2
+    data = struct.pack('<BHBB', frame_control, manufacturer_code, seq, command)
+  else:
+    data = struct.pack('<BBB', frame_control, seq, command)
+
+  data += _encode_helper(args, kwargs)
+
+  return cluster, data

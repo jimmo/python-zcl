@@ -82,6 +82,11 @@ class Endpoint(enum.IntEnum):
   ZDO = 0x00
 
 
+class ZclCommandType(enum.IntEnum):
+  PROFILE = 0
+  CLUSTER = 1
+
+
 class Status(enum.IntEnum):
   SUCCESS = 0X00
   FAILURE = 0X01
@@ -159,6 +164,7 @@ def _decode_helper(args, data, i=0):
   b = 0
 
   for arg in args:
+    print(arg)
     arg = arg.split(':')
     name, datatype = arg[0], arg[1],
 
@@ -279,7 +285,7 @@ PROFILE_COMMANDS_BY_NAME = {
 
 
 PROFILE_COMMANDS_BY_ID = {
-  command: (command_name, args) for command_name, (command, args) in PROFILE_COMMANDS_BY_NAME
+  command: (command_name, args) for command_name, (command, args) in PROFILE_COMMANDS_BY_NAME.items()
 }
 
 
@@ -434,24 +440,40 @@ for cluster_name, (cluster, rx_commands, tx_commands, attributes,) in CLUSTERS_B
 
 def decode_zcl(cluster, data):
   frame_control, = struct.unpack('<B', data[:1])
-  frame_type = not not (frame_control & 1)
-  direction = not not (frame_control & (1 << 3))
-  manufacturer_specific = not not (frame_control & (1 << 4))
+  frame_type = frame_control & 1
+  direction = frame_control & (1 << 3)
+  manufacturer_specific = 0 #frame_control & (1 << 4)      ??
+  print(frame_type, direction, manufacturer_specific)
 
   if manufacturer_specific:
     manufacturer_code, seq, command = struct.unpack('<HBB', data[1:5])
+    data = data[5:]
   else:
     manufacturer_code = 0
     seq, command = struct.unpack('<BB', data[1:3])
+    data = data[3:]
 
+  print(manufacturer_code, seq, command)
+
+  if cluster not in CLUSTERS_BY_ID:
+    raise ValueError('Unknown cluster {}'.format(cluster))
   cluster_name, rx_commands, tx_commands, attributes = CLUSTERS_BY_ID[cluster]
-  if frame_control == 0:
+
+  if frame_type == 0:
     # Profile command
-    pass
+    if command not in PROFILE_COMMANDS_BY_ID:
+      raise ValueError('Unknown profile command {} for cluster "{}"'.format(command, cluster_name))
+    command_name, args = PROFILE_COMMANDS_BY_ID[command]
+    print(command_name, args)
+    kwargs, _nbytes = _decode_helper(args, data)
+    return cluster_name, seq, ZclCommandType.PROFILE, command_name, kwargs
   else:
     # Cluster command
-
-  return None
+    if command not in tx_commands:
+      raise ValueError('Unknown cluster command {} for cluster "{}"'.format(command, cluster_name))
+    command_name, args = tx_commands[command]
+    kwargs, _nbytes = _decode_helper(args, data)
+    return cluster_name, seq, ZclCommandType.CLUSTER, command_name, kwargs
 
 
 def encode_cluster_command(cluster_name, command_name, seq, direction=0, default_response=True, manufacturer_code=None, **kwargs):

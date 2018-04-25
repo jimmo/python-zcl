@@ -78,6 +78,10 @@ class Profile(enum.IntEnum):
   ZIGBEE_LIGHT_LINK = 0xc05e
 
 
+def get_profile_by_name(n):
+  return getattr(Profile, n.upper(), None)
+
+
 class Endpoint(enum.IntEnum):
   ZDO = 0x00
 
@@ -246,6 +250,8 @@ def _encode_helper(args, kwargs):
       raise ValueError('Unhandled list for "{}"'.format(arg))
 
     fmt, _nbytes, = STRUCT_TYPES[datatype]
+    if datatype == 'uint64' and isinstance(kwargs[name], str):
+      kwargs[name] = int(kwargs[name], 16)
     data += struct.pack(fmt, kwargs[name])
 
   return data
@@ -459,6 +465,11 @@ def decode_zcl(cluster, data):
     raise ValueError('Unknown cluster {}'.format(cluster))
   cluster_name, rx_commands, tx_commands, attributes = CLUSTERS_BY_ID[cluster]
 
+  if direction == 0:
+    commands = rx_commands
+  else:
+    commands = tx_commands
+
   if frame_type == 0:
     # Profile command
     if command not in PROFILE_COMMANDS_BY_ID:
@@ -469,9 +480,9 @@ def decode_zcl(cluster, data):
     return cluster_name, seq, ZclCommandType.PROFILE, command_name, kwargs
   else:
     # Cluster command
-    if command not in tx_commands:
+    if command not in commands:
       raise ValueError('Unknown cluster command {} for cluster "{}"'.format(command, cluster_name))
-    command_name, args = tx_commands[command]
+    command_name, args = commands[command]
     kwargs, _nbytes = _decode_helper(args, data)
     return cluster_name, seq, ZclCommandType.CLUSTER, command_name, kwargs
 
@@ -503,3 +514,56 @@ def encode_cluster_command(cluster_name, command_name, seq, direction=0, default
   data += _encode_helper(args, kwargs)
 
   return cluster, data
+
+
+def get_json():
+  return {
+    'profile': [
+      {
+        'name': p.name,
+        'profile': p
+      } for p in Profile
+    ],
+    'zdo': [
+      {
+        'cluster_name': cluster_name,
+        'cluster': cluster,
+        'args': args
+      } for cluster_name, (cluster, args) in ZDO_BY_NAME.items()
+    ],
+    'status': [s.name for s in Status],
+    'profile_command': [
+      {
+        'name': command_name,
+        'command': command,
+        'args': args
+      } for command_name, (command, args) in PROFILE_COMMANDS_BY_NAME.items()
+    ],
+    'cluster': [
+      {
+        'name': cluster_name,
+        'cluster': cluster,
+        'rx_commands': [
+          {
+            'name': command_name,
+            'command': command,
+            'args': args
+          } for command_name, (command, args) in rx_commands.items()
+        ],
+        'tx_commands': [
+          {
+            'name': command_name,
+            'command': command,
+            'args': args
+          } for command_name, (command, args) in tx_commands.items()
+        ],
+        'attributes': [
+          {
+            'name': attribute_name,
+            'attribute': attribute,
+            'datatype': datatype
+          } for attribute_name, (attribute, datatype) in attributes.items()
+        ],
+      } for cluster_name, (cluster, rx_commands, tx_commands, attributes) in CLUSTERS_BY_NAME.items()
+    ]
+  }

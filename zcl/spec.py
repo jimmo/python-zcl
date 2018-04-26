@@ -174,24 +174,24 @@ def _decode_helper(args, data, i=0):
 
     v = None
 
-    info = STRUCT_TYPES[datatype.strip('*#')]
-    if not callable(info):
-      fmt, nbytes, = info
-      info = lambda dd, ii: (struct.unpack(fmt, dd[ii:ii + nbytes])[0], ii + nbytes,)
+    decode, encode = STRUCT_TYPES[datatype.strip('*#')]
+    if not callable(decode):
+      fmt, nbytes, = decode, encode
+      decode = lambda dd, ii: (struct.unpack(fmt, dd[ii:ii + nbytes])[0], ii + nbytes,)
 
     if datatype.startswith('*'):
       v = []
       for _i in range(n):
-        x, i = info(data, i)
+        x, i = decode(data, i)
         v.append(x)
     elif datatype.startswith('#'):
       v = []
       ii = i + b
       while i < ii:
-        x, i = info(data, i)
+        x, i = decode(data, i)
         v.append(x)
     else:
-      v, i = info(data, i)
+      v, i = decode(data, i)
 
     if name.startswith('n_'):
       n = v
@@ -205,8 +205,37 @@ def _decode_helper(args, data, i=0):
   return kwargs, i
 
 
-def _parse_simple_descriptor(data, i):
+def _decode_simple_descriptor(data, i):
   return _decode_helper(('endpoint:uint8', 'profile:uint16', 'device_identifier:uint16', 'device_version:uint8', 'n_in_clusters:uint8', 'in_clusters:*uint16', 'n_out_clusters:uint8', 'out_clusters:*uint16',), data, i)
+
+def _encode_simple_descriptor():
+  pass
+
+
+def _decode_string(data, i):
+  nbytes, = struct.unpack('<B', data[i:i+1])
+  nbytes += 1
+  return data[i+1:i+nbytes].decode(), nbytes
+
+
+def _encode_string(val):
+  val = val.encode()
+  return struct.pack('<B', len(val)) + val
+
+
+def _decode_status(data, i):
+  status, = struct.unpack('<B', data[i:i+1])
+  for s in Status:
+    if s.value == status:
+      return s.name, 1
+  raise ValueError('Unknown status {}'.format(status))
+
+
+def _encode_status(val):
+  for s in Status:
+    if s.name == val:
+      return struct.pack('<B', s.value)
+  raise ValueError('Unknown status {}'.format(val))
 
 
 STRUCT_TYPES = {
@@ -219,7 +248,9 @@ STRUCT_TYPES = {
   'int32': ('<i', 4,),
   'int64': ('<q', 8,),
   'enum8': ('<B', 1,),
-  'simple_descriptor': _parse_simple_descriptor,
+  'status8': (_decode_status, _encode_status,),
+  'string': (_decode_string, _encode_string,),
+  'simple_descriptor': (_decode_simple_descriptor, _encode_simple_descriptor,),
 }
 
 
@@ -249,10 +280,14 @@ def _encode_helper(args, kwargs):
     if name.startswith('n_') or datatype.startswith('*'):
       raise ValueError('Unhandled list for "{}"'.format(arg))
 
-    fmt, _nbytes, = STRUCT_TYPES[datatype]
-    if datatype == 'uint64' and isinstance(kwargs[name], str):
-      kwargs[name] = int(kwargs[name], 16)
-    data += struct.pack(fmt, kwargs[name])
+    decode, encode = STRUCT_TYPES[datatype]
+    if not callable(decode):
+      fmt, _nbytes = decode, encode
+      if datatype == 'uint64' and isinstance(kwargs[name], str):
+        kwargs[name] = int(kwargs[name], 16)
+      data += struct.pack(fmt, kwargs[name])
+    else:
+      data += encode(kwargs[name])
 
   return data
 
@@ -335,7 +370,7 @@ CLUSTERS_BY_NAME = {
     'remove_all_groups': (0x04, (),),
     'add_group_if_identifying': (0x05, ('id:uint16', 'name:string'),),
   }, {
-    'add_group_response': (0x00, ('status:status8:success,duplicate_exists,insufficient_space', 'id:uint16',),),
+    'add_group_response': (0x00, ('status:status8', 'id:uint16',),),
     'view_group_response': (0x01, ('status:status8', 'id:uint16', 'name:string'),),
     'get_group_membership_response': (0x02, ('capacity:uint8', 'count:uint8', 'ids:*uint16',),),
     'remove_group_response': (0x03, ('status:status8', 'id:uint16',),),

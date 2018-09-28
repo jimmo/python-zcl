@@ -59,18 +59,33 @@
 #   "active endpoints" (get the list of endpoint IDs)
 
 # t_int = 0
-# class DataType(IntEnum):
-#   # ZCL Spec -- "2.5.2 Data Types"
-#   BOOLEAN = 0x10
-#   UINT8 = 0x20
-#   UINT16 = 0x21
-#   UINT64 = 0x27
-#   ENUM8 = 0x30
-#   ENUM16 = 0x31
-#   CHARACTER_STRING = 0x42
 
 import enum
 import struct
+
+
+class DataType(enum.IntEnum):
+  # ZCL Spec -- "2.5.2 Data Types"
+  NULL = 0x00
+  BOOLEAN = 0x10
+  BITMAP8 = 0x18
+  BITMAP16 = 0x19
+  BITMAP64 = 0x1f
+  UINT8 = 0x20
+  UINT16 = 0x21
+  UINT64 = 0x27
+  INT8 = 0x28
+  INT16 = 0x29
+  INT64 = 0x2f
+  ENUM8 = 0x30
+  ENUM16 = 0x31
+  CHARACTER_STRING = 0x42
+
+
+ANALOG_DATATYPES = set([
+  DataType.UINT8, DataType.UINT16, DataType.UINT64, DataType.INT8, DataType.INT16, DataType.INT64
+])
+
 
 class Profile(enum.IntEnum):
   ZIGBEE = 0x0000
@@ -177,21 +192,27 @@ def _decode_helper(args, data, i=0):
     decode, encode = STRUCT_TYPES[datatype.strip('*#')]
     if not callable(decode):
       fmt, nbytes, = decode, encode
-      decode = lambda dd, ii: (struct.unpack(fmt, dd[ii:ii + nbytes])[0], ii + nbytes,)
+      decode = lambda dd, ii, _: (struct.unpack(fmt, dd[ii:ii + nbytes])[0], ii + nbytes,)
 
     if datatype.startswith('*'):
       v = []
       for _i in range(n):
-        x, i = decode(data, i)
+        x, i = decode(data, i, kwargs)
         v.append(x)
     elif datatype.startswith('#'):
       v = []
       ii = i + b
       while i < ii:
-        x, i = decode(data, i)
+        x, i = decode(data, i, kwargs)
         v.append(x)
     else:
-      v, i = decode(data, i)
+      v, i = decode(data, i, kwargs)
+
+    stop = False
+    if name.startswith('s_'):
+      name = name[2:]
+      if v != 'SUCCESS':
+        stop = True
 
     if name.startswith('n_'):
       n = v
@@ -202,20 +223,73 @@ def _decode_helper(args, data, i=0):
       n = 1
       b = 0
 
+    if stop:
+      break
+
   return kwargs, i
 
 
-def _decode_simple_descriptor(data, i):
+def _decode_simple_descriptor(data, i, obj):
   return _decode_helper(('endpoint:uint8', 'profile:uint16', 'device_identifier:uint16', 'device_version:uint8', 'n_in_clusters:uint8', 'in_clusters:*uint16', 'n_out_clusters:uint8', 'out_clusters:*uint16',), data, i)
 
 def _encode_simple_descriptor():
   pass
 
 
-def _decode_string(data, i):
+def _decode_read_attr_status(data, i, obj):
+  return _decode_helper(('attribute:uint16', 's_status:status8', 'datatype:uint8', 'value:datatype',), data, i)
+
+def _encode_read_attr_status():
+  pass
+
+
+def _decode_datatype(data, i, obj):
+  if 'datatype' not in obj:
+    raise ValueError('Object needs datatype field.')
+  datatype = obj['datatype']
+
+  if datatype == DataType.NULL:
+    return None, i,
+
+  if datatype not in DATATYPE_STRUCT_TYPES:
+    raise ValueError('Unknown struct type')
+  
+  decode, encode = STRUCT_TYPES[DATATYPE_STRUCT_TYPES[datatype]]
+  if not callable(decode):
+    fmt, nbytes, = decode, encode
+    decode = lambda dd, ii, _: (struct.unpack(fmt, dd[ii:ii + nbytes])[0], ii + nbytes,)
+  
+  return decode(data, i, obj)
+
+def _encode_datatype():
+  pass
+
+
+def _decode_attr_reporting_config():
+  pass
+
+def _encode_attr_reporting_config(obj):
+  data = bytes()
+  datatype = DATATYPES_BY_NAME[obj['datatype']]
+  # min=1s, max=60s
+  data += struct.pack('<BHBHH', 0, obj['attribute'], datatype, 1, 60)
+  if datatype in ANALOG_DATATYPES:
+    decode, encode = STRUCT_TYPES[DATATYPE_STRUCT_TYPES[datatype]]
+    data += struct.pack(encode, 50)  # TODO
+  return data
+  
+def _decode_attr_reporting_status():
+  return _decode_helper(('status:status8', 'direction:uint8', 'attribute:uint16',), data, i)
+
+
+def _encode_attr_reporting_status():
+  pass
+
+
+def _decode_string(data, i, obj):
   nbytes, = struct.unpack('<B', data[i:i+1])
   nbytes += 1
-  return data[i+1:i+nbytes].decode(), nbytes
+  return data[i+1:i+nbytes].decode(), i + nbytes
 
 
 def _encode_string(val):
@@ -223,11 +297,11 @@ def _encode_string(val):
   return struct.pack('<B', len(val)) + val
 
 
-def _decode_status(data, i):
+def _decode_status(data, i, obj):
   status, = struct.unpack('<B', data[i:i+1])
   for s in Status:
     if s.value == status:
-      return s.name, 1
+      return s.name, i + 1
   raise ValueError('Unknown status {}'.format(status))
 
 
@@ -248,9 +322,47 @@ STRUCT_TYPES = {
   'int32': ('<i', 4,),
   'int64': ('<q', 8,),
   'enum8': ('<B', 1,),
+  'enum16': ('<H', 2,),
   'status8': (_decode_status, _encode_status,),
   'string': (_decode_string, _encode_string,),
   'simple_descriptor': (_decode_simple_descriptor, _encode_simple_descriptor,),
+  'read_attr_status': (_decode_read_attr_status, _encode_read_attr_status,),
+  'datatype': (_decode_datatype, _encode_datatype,),
+  'attr_reporting_config': (_decode_attr_reporting_config, _encode_attr_reporting_config,),
+  'attr_reporting_status': (_decode_attr_reporting_status, _encode_attr_reporting_status,),
+}
+
+
+DATATYPE_STRUCT_TYPES = {
+  DataType.BOOLEAN: 'uint8',
+  DataType.BITMAP8: 'uint8',
+  DataType.BITMAP16: 'uint16',
+  DataType.BITMAP64: 'uint64',
+  DataType.UINT8: 'uint8',
+  DataType.UINT16: 'uint16',
+  DataType.UINT64: 'uint64',
+  DataType.INT8: 'int8',
+  DataType.INT16: 'int16',
+  DataType.INT64: 'int64',
+  DataType.ENUM8: 'enum8',
+  DataType.ENUM16: 'enum16',
+  DataType.CHARACTER_STRING: 'string',
+}
+
+DATATYPES_BY_NAME = {
+  'uint8': DataType.BOOLEAN,
+  'uint8': DataType.BITMAP8,
+  'uint16': DataType.BITMAP16,
+  'uint64': DataType.BITMAP64,
+  'uint8': DataType.UINT8,
+  'uint16': DataType.UINT16,
+  'uint64': DataType.UINT64,
+  'int8': DataType.INT8,
+  'int16': DataType.INT16,
+  'int64': DataType.INT64,
+  'enum8': DataType.ENUM8,
+  'enum16': DataType.ENUM16,
+  'string': DataType.CHARACTER_STRING,
 }
 
 
@@ -273,21 +385,32 @@ def decode_zdo(cluster, data):
 def _encode_helper(args, kwargs):
   data = bytes()
 
+  print('encode', args, kwargs)
+
   for arg in args:
     arg = arg.split(':')
     name, datatype = arg[0], arg[1],
+    values = [kwargs[name]]
 
-    if name.startswith('n_') or datatype.startswith('*'):
-      raise ValueError('Unhandled list for "{}"'.format(arg))
+    if name.startswith('n_'):
+      raise ValueError('Unhandled list length for "{}"'.format(arg))
+
+    if datatype.startswith('*'):
+      datatype = datatype[1:]
+      values = kwargs[name]
+
+    print(' encode', name, datatype, values)
 
     decode, encode = STRUCT_TYPES[datatype]
-    if not callable(decode):
-      fmt, _nbytes = decode, encode
-      if datatype == 'uint64' and isinstance(kwargs[name], str):
-        kwargs[name] = int(kwargs[name], 16)
-      data += struct.pack(fmt, kwargs[name])
-    else:
-      data += encode(kwargs[name])
+    
+    for value in values:
+      if not callable(decode):
+        fmt, _nbytes = decode, encode
+        if datatype == 'uint64' and isinstance(value, str):
+          value = int(value, 16)
+        data += struct.pack(fmt, value)
+      else:
+        data += encode(value)
 
   return data
 
@@ -305,14 +428,14 @@ def encode_zdo(cluster_name, seq, **kwargs):
 
 PROFILE_COMMANDS_BY_NAME = {
   # ZCL Spec -- "2.5 General Command Frames"
-  'read_attributes': (0x00, ('*uint16',),),
-  'read_attributes_response': (0x01, ('*read_attr_status',),),
-  'write_attributes': (0x02, ('*write_attr',),),
-  'write_attributes_undivided': (0x03, ('*write_attr',),),
-  'write_attributes_response': (0x04, ('*write_attr_status',),),
-  'write_attributes_no_response': (0x05, ('*write_attr',),),
-  'configure_reporting': (0x06, ('*attr_reporting_config',),),
-  'configure_reporting_response': (0x07, ('*attr_status',),),
+  'read_attributes': (0x00, ('attributes:*uint16',),),
+  'read_attributes_response': (0x01, ('attributes:*read_attr_status',),),
+  'write_attributes': (0x02, ('a:*write_attr',),),
+  'write_attributes_undivided': (0x03, ('a:*write_attr',),),
+  'write_attributes_response': (0x04, ('*a:write_attr_status',),),
+  'write_attributes_no_response': (0x05, ('a:*write_attr',),),
+  'configure_reporting': (0x06, ('configs:*attr_reporting_config',),),
+  'configure_reporting_response': (0x07, ('results:*attr_reporting_status',),),
   # 'read_reporting_configuration': (0x08, (),),
   # 'read_reporting_configuration_response': (0x09, (),),
   # 'report_attributes': (0x0a, (),),
@@ -484,7 +607,7 @@ def decode_zcl(cluster, data):
   frame_type = frame_control & 1
   direction = frame_control & (1 << 3)
   manufacturer_specific = 0 #frame_control & (1 << 4)      ??
-  print(frame_type, direction, manufacturer_specific)
+  #print(frame_type, direction, manufacturer_specific)
 
   if manufacturer_specific:
     manufacturer_code, seq, command = struct.unpack('<HBB', data[1:5])
@@ -494,7 +617,7 @@ def decode_zcl(cluster, data):
     seq, command = struct.unpack('<BB', data[1:3])
     data = data[3:]
 
-  print(manufacturer_code, seq, command)
+  #print(manufacturer_code, seq, command)
 
   if cluster not in CLUSTERS_BY_ID:
     raise ValueError('Unknown cluster {}'.format(cluster))
@@ -510,7 +633,7 @@ def decode_zcl(cluster, data):
     if command not in PROFILE_COMMANDS_BY_ID:
       raise ValueError('Unknown profile command {} for cluster "{}"'.format(command, cluster_name))
     command_name, args = PROFILE_COMMANDS_BY_ID[command]
-    print(command_name, args)
+    #print(command_name, args)
     kwargs, _nbytes = _decode_helper(args, data)
     return cluster_name, seq, ZclCommandType.PROFILE, command_name, kwargs
   else:
@@ -533,8 +656,8 @@ def encode_cluster_command(cluster_name, command_name, seq, direction=0, default
 
   command, args = rx_commands[command_name]
 
-  # ZCL Spec - "2.1.1.1 Frame Control Field"
-  frame_control = 1  # Cluster command
+  # ZCL Spec - "2.4.1.1 Frame Control Field"
+  frame_control = 1  # Cluster command (command is specific to this cluster)
   if direction:
     frame_control |= 1 << 3
   if not default_response:
@@ -545,6 +668,26 @@ def encode_cluster_command(cluster_name, command_name, seq, direction=0, default
     data = struct.pack('<BHBB', frame_control, manufacturer_code, seq, command)
   else:
     data = struct.pack('<BBB', frame_control, seq, command)
+
+  data += _encode_helper(args, kwargs)
+
+  return cluster, data
+
+
+def encode_profile_command(cluster_name, command_name, seq, direction=0, default_response=True, manufacturer_code=None, **kwargs):
+  if cluster_name not in CLUSTERS_BY_NAME:
+    raise ValueError('Unknown cluster "{}"'.format(cluster_name))
+
+  cluster, rx_commands, tx_commands, attributes = CLUSTERS_BY_NAME[cluster_name]
+
+  if command_name not in PROFILE_COMMANDS_BY_NAME:
+    raise ValueError('Unknown command "{}"'.format(command_name))
+
+  command, args = PROFILE_COMMANDS_BY_NAME[command_name]
+
+  # ZCL Spec - "2.4.1.1 Frame Control Field"
+  frame_control = 0  # Profile  command (command applies to all clusters)
+  data = struct.pack('<BBB', frame_control, seq, command)
 
   data += _encode_helper(args, kwargs)
 

@@ -107,40 +107,40 @@ class ZclCommandType(enum.IntEnum):
 
 
 class Status(enum.IntEnum):
-  SUCCESS = 0X00
-  FAILURE = 0X01
-  NOT_AUTHORIZED = 0X7E
-  RESERVED_FIELD_NOT_ZERO = 0X7F
-  MALFORMED_COMMAND = 0X80
-  UNSUP_CLUSTER_COMMAND = 0X81
-  UNSUP_GENERAL_COMMAND = 0X82
-  UNSUP_MANUF_CLUSTER_COMMAND = 0X83
-  UNSUP_MANUF_GENERAL_COMMAND = 0X84
-  INVALID_FIELD = 0X85
-  UNSUPPORTED_ATTRIBUTE = 0X86
-  INVALID_VALUE = 0X87
-  INSUFFICIENT_SPACE = 0X89
-  DUPLICATE_EXISTS = 0X8A
-  NOT_FOUND = 0X8B
-  UNREPORTABLE_ATTRIBUTE = 0X8C
-  INVALID_DATA_TYPE = 0X8D
-  INVALID_SELECTOR = 0X8E
-  WRITE_ONLY = 0X8F
-  INCONSISTENT_STARTUP_STATE = 0X90
-  DEFINED_OUT_OF_BAND = 0X91
-  INCONSISTENT = 0X92
-  ACTION_DENIED = 0X93
-  TIMEOUT = 0X94
-  ABORT = 0X95
-  INVALID_IMAGE = 0X96
-  WAIT_FOR_DATA = 0X97
-  NO_IMAGE_AVAILABLE = 0X98
-  REQUIRE_MORE_IMAGE = 0X99
-  NOTIFICATION_PENDING = 0X9A
-  HARDWARE_FAILURE = 0XC0
-  SOFTWARE_FAILURE = 0XC1
-  CALIBRATION_ERROR = 0XC2
-  UNSUPPORTED_CLUSTER = 0XC3
+  SUCCESS = 0x00
+  FAILURE = 0x01
+  NOT_AUTHORIZED = 0x7E
+  RESERVED_FIELD_NOT_ZERO = 0x7F
+  MALFORMED_COMMAND = 0x80
+  UNSUP_CLUSTER_COMMAND = 0x81
+  UNSUP_GENERAL_COMMAND = 0x82
+  UNSUP_MANUF_CLUSTER_COMMAND = 0x83
+  UNSUP_MANUF_GENERAL_COMMAND = 0x84
+  INVALID_FIELD = 0x85
+  UNSUPPORTED_ATTRIBUTE = 0x86
+  INVALID_VALUE = 0x87
+  INSUFFICIENT_SPACE = 0x89
+  DUPLICATE_EXISTS = 0x8A
+  NOT_FOUND = 0x8B
+  UNREPORTABLE_ATTRIBUTE = 0x8C
+  INVALID_DATA_TYPE = 0x8D
+  INVALID_SELECTOR = 0x8E
+  WRITE_ONLY = 0x8F
+  INCONSISTENT_STARTUP_STATE = 0x90
+  DEFINED_OUT_OF_BAND = 0x91
+  INCONSISTENT = 0x92
+  ACTION_DENIED = 0x93
+  TIMEOUT = 0x94
+  ABORT = 0x95
+  INVALID_IMAGE = 0x96
+  WAIT_FOR_DATA = 0x97
+  NO_IMAGE_AVAILABLE = 0x98
+  REQUIRE_MORE_IMAGE = 0x99
+  NOTIFICATION_PENDING = 0x9A
+  HARDWARE_FAILURE = 0xC0
+  SOFTWARE_FAILURE = 0xC1
+  CALIBRATION_ERROR = 0xC2
+  UNSUPPORTED_CLUSTER = 0xC3
 
 
 ZDO_BY_NAME = {
@@ -183,25 +183,33 @@ def _decode_helper(args, data, i=0):
   b = 0
 
   for arg in args:
-    print(arg)
     arg = arg.split(':')
     name, datatype = arg[0], arg[1],
 
     v = None
 
-    decode, encode = STRUCT_TYPES[datatype.strip('*#')]
+    decode, encode = STRUCT_TYPES[datatype.strip('*#%')]
     if not callable(decode):
       fmt, nbytes, = decode, encode
       decode = lambda dd, ii, _: (struct.unpack(fmt, dd[ii:ii + nbytes])[0], ii + nbytes,)
 
     if datatype.startswith('*'):
+      # Repeat n times
       v = []
       for _i in range(n):
         x, i = decode(data, i, kwargs)
         v.append(x)
     elif datatype.startswith('#'):
+      # There are b bytes of records
       v = []
       ii = i + b
+      while i < ii:
+        x, i = decode(data, i, kwargs)
+        v.append(x)
+    elif datatype.startswith('%'):
+      # Keep reading records until end of frame
+      v = []
+      ii = len(data)
       while i < ii:
         x, i = decode(data, i, kwargs)
         v.append(x)
@@ -272,17 +280,30 @@ def _encode_attr_reporting_config(obj):
   data = bytes()
   datatype = DATATYPES_BY_NAME[obj['datatype']]
   # min=1s, max=60s
-  data += struct.pack('<BHBHH', 0, obj['attribute'], datatype, 1, 60)
+  data += struct.pack('<BHBHH', 0, obj['attribute'], datatype, obj['minimum'], obj['maximum'])
   if datatype in ANALOG_DATATYPES:
     decode, encode = STRUCT_TYPES[DATATYPE_STRUCT_TYPES[datatype]]
-    data += struct.pack(encode, 50)  # TODO
+    fmt, _nbytes = decode, encode
+    data += struct.pack(fmt, 50)  # TODO
   return data
   
-def _decode_attr_reporting_status():
+def _decode_attr_reporting_status(data, i, obj):
+  # Note that attribute status records are not included for successfully configured attributes, in order to save bandwidth. In the case of successful configuration of all attributes, only a single attribute status record SHALL be included in the command, with the status field set to SUCCESS and the direction and attribute identifier fields omitted.
+  if data[i] == 0x00 and len(data) - i == 1:
+    return {
+      'status': 'SUCCESS',
+    }, i + 1
   return _decode_helper(('status:status8', 'direction:uint8', 'attribute:uint16',), data, i)
 
 
 def _encode_attr_reporting_status():
+  pass
+
+
+def _decode_reported_attribute(data, i, obj):
+  return _decode_helper(('attribute:uint16', 'datatype:uint8', 'value:datatype',), data, i)
+
+def _encode_reported_attribute():
   pass
 
 
@@ -330,6 +351,7 @@ STRUCT_TYPES = {
   'datatype': (_decode_datatype, _encode_datatype,),
   'attr_reporting_config': (_decode_attr_reporting_config, _encode_attr_reporting_config,),
   'attr_reporting_status': (_decode_attr_reporting_status, _encode_attr_reporting_status,),
+  'reported_attribute': (_decode_reported_attribute, _encode_reported_attribute,),
 }
 
 
@@ -350,10 +372,10 @@ DATATYPE_STRUCT_TYPES = {
 }
 
 DATATYPES_BY_NAME = {
-  'uint8': DataType.BOOLEAN,
-  'uint8': DataType.BITMAP8,
-  'uint16': DataType.BITMAP16,
-  'uint64': DataType.BITMAP64,
+  'bool': DataType.BOOLEAN,
+  'bitmap8': DataType.BITMAP8,
+  'bitmap16': DataType.BITMAP16,
+  'bitmap64': DataType.BITMAP64,
   'uint8': DataType.UINT8,
   'uint16': DataType.UINT16,
   'uint64': DataType.UINT64,
@@ -385,8 +407,6 @@ def decode_zdo(cluster, data):
 def _encode_helper(args, kwargs):
   data = bytes()
 
-  print('encode', args, kwargs)
-
   for arg in args:
     arg = arg.split(':')
     name, datatype = arg[0], arg[1],
@@ -398,8 +418,6 @@ def _encode_helper(args, kwargs):
     if datatype.startswith('*'):
       datatype = datatype[1:]
       values = kwargs[name]
-
-    print(' encode', name, datatype, values)
 
     decode, encode = STRUCT_TYPES[datatype]
     
@@ -429,16 +447,16 @@ def encode_zdo(cluster_name, seq, **kwargs):
 PROFILE_COMMANDS_BY_NAME = {
   # ZCL Spec -- "2.5 General Command Frames"
   'read_attributes': (0x00, ('attributes:*uint16',),),
-  'read_attributes_response': (0x01, ('attributes:*read_attr_status',),),
+  'read_attributes_response': (0x01, ('attributes:%read_attr_status',),),
   'write_attributes': (0x02, ('a:*write_attr',),),
   'write_attributes_undivided': (0x03, ('a:*write_attr',),),
   'write_attributes_response': (0x04, ('*a:write_attr_status',),),
   'write_attributes_no_response': (0x05, ('a:*write_attr',),),
   'configure_reporting': (0x06, ('configs:*attr_reporting_config',),),
-  'configure_reporting_response': (0x07, ('results:*attr_reporting_status',),),
+  'configure_reporting_response': (0x07, ('results:%attr_reporting_status',),),
   # 'read_reporting_configuration': (0x08, (),),
   # 'read_reporting_configuration_response': (0x09, (),),
-  # 'report_attributes': (0x0a, (),),
+  'report_attributes': (0x0a, ('attributes:%reported_attribute',),),
   'default_response': (0x0b, ('command:uint8', 'status:uint8',),),
   # 'discover_attributes': (0x0c, (),),
   # 'discover_attributes_response': (0x0d, (),),
@@ -633,7 +651,6 @@ def decode_zcl(cluster, data):
     if command not in PROFILE_COMMANDS_BY_ID:
       raise ValueError('Unknown profile command {} for cluster "{}"'.format(command, cluster_name))
     command_name, args = PROFILE_COMMANDS_BY_ID[command]
-    #print(command_name, args)
     kwargs, _nbytes = _decode_helper(args, data)
     return cluster_name, seq, ZclCommandType.PROFILE, command_name, kwargs
   else:

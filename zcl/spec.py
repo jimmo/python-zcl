@@ -284,7 +284,7 @@ def _encode_attr_reporting_config(obj):
   if datatype in ANALOG_DATATYPES:
     decode, encode = STRUCT_TYPES[DATATYPE_STRUCT_TYPES[datatype]]
     fmt, _nbytes = decode, encode
-    data += struct.pack(fmt, 50)  # TODO
+    data += struct.pack(fmt, obj.get('delta', 1))
   return data
   
 def _decode_attr_reporting_status(data, i, obj):

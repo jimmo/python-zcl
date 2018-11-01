@@ -663,7 +663,7 @@ def decode_zcl(cluster, data):
     return cluster_name, seq, ZclCommandType.CLUSTER, command_name, not disable_default_response, kwargs
 
 
-def encode_cluster_command(cluster_name, command_name, seq, direction=0, default_response=True, manufacturer_code=None, **kwargs):
+def get_cluster_rx_command(cluster_name, command_name):
   if cluster_name not in CLUSTERS_BY_NAME:
     raise ValueError('Unknown cluster "{}"'.format(cluster_name))
 
@@ -673,6 +673,11 @@ def encode_cluster_command(cluster_name, command_name, seq, direction=0, default
     raise ValueError('Unknown command "{}"'.format(command_name))
 
   command, args = rx_commands[command_name]
+  return command, args
+
+
+def encode_cluster_command(cluster_name, command_name, seq, direction=0, default_response=True, manufacturer_code=None, **kwargs):
+  command, args = get_cluster_rx_command(cluster_name, command_name)
 
   # ZCL Spec - "2.4.1.1 Frame Control Field"
   frame_control = 1  # Cluster command (command is specific to this cluster)

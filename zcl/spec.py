@@ -261,12 +261,12 @@ def _decode_datatype(data, i, obj):
 
   if datatype not in DATATYPE_STRUCT_TYPES:
     raise ValueError('Unknown struct type')
-  
+
   decode, encode = STRUCT_TYPES[DATATYPE_STRUCT_TYPES[datatype]]
   if not callable(decode):
     fmt, nbytes, = decode, encode
     decode = lambda dd, ii, _: (struct.unpack(fmt, dd[ii:ii + nbytes])[0], ii + nbytes,)
-  
+
   return decode(data, i, obj)
 
 def _encode_datatype():
@@ -286,7 +286,7 @@ def _encode_attr_reporting_config(obj):
     fmt, _nbytes = decode, encode
     data += struct.pack(fmt, obj.get('delta', 1))
   return data
-  
+
 def _decode_attr_reporting_status(data, i, obj):
   # Note that attribute status records are not included for successfully configured attributes, in order to save bandwidth. In the case of successful configuration of all attributes, only a single attribute status record SHALL be included in the command, with the status field set to SUCCESS and the direction and attribute identifier fields omitted.
   if data[i] == 0x00 and len(data) - i == 1:
@@ -420,7 +420,7 @@ def _encode_helper(args, kwargs):
       values = kwargs[name]
 
     decode, encode = STRUCT_TYPES[datatype]
-    
+
     for value in values:
       if not callable(decode):
         fmt, _nbytes = decode, encode
@@ -663,21 +663,29 @@ def decode_zcl(cluster, data):
     return cluster_name, seq, ZclCommandType.CLUSTER, command_name, not disable_default_response, kwargs
 
 
+def get_cluster_by_name(cluster_name):
+  if cluster_name not in CLUSTERS_BY_NAME:
+    raise ValueError('Unknown cluster "{}"'.format(cluster_name))
+
+  cluster, _rx_commands, _tx_commands, _attributes = CLUSTERS_BY_NAME[cluster_name]
+  return cluster
+
+
 def get_cluster_rx_command(cluster_name, command_name):
   if cluster_name not in CLUSTERS_BY_NAME:
     raise ValueError('Unknown cluster "{}"'.format(cluster_name))
 
-  cluster, rx_commands, tx_commands, attributes = CLUSTERS_BY_NAME[cluster_name]
+  cluster, rx_commands, _tx_commands, _attributes = CLUSTERS_BY_NAME[cluster_name]
 
   if command_name not in rx_commands:
     raise ValueError('Unknown command "{}"'.format(command_name))
 
   command, args = rx_commands[command_name]
-  return command, args
+  return cluster, command, args
 
 
 def encode_cluster_command(cluster_name, command_name, seq, direction=0, default_response=True, manufacturer_code=None, **kwargs):
-  command, args = get_cluster_rx_command(cluster_name, command_name)
+  cluster, command, args = get_cluster_rx_command(cluster_name, command_name)
 
   # ZCL Spec - "2.4.1.1 Frame Control Field"
   frame_control = 1  # Cluster command (command is specific to this cluster)

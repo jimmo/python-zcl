@@ -624,7 +624,8 @@ def decode_zcl(cluster, data):
   frame_control, = struct.unpack('<B', data[:1])
   frame_type = frame_control & 1
   direction = frame_control & (1 << 3)
-  manufacturer_specific = 0 #frame_control & (1 << 4)      ??
+  disable_default_response = frame_control & (1 << 4)
+  manufacturer_specific = 0 #frame_control & (1 << 2)      ??
   #print(frame_type, direction, manufacturer_specific)
 
   if manufacturer_specific:
@@ -652,14 +653,14 @@ def decode_zcl(cluster, data):
       raise ValueError('Unknown profile command {} for cluster "{}"'.format(command, cluster_name))
     command_name, args = PROFILE_COMMANDS_BY_ID[command]
     kwargs, _nbytes = _decode_helper(args, data)
-    return cluster_name, seq, ZclCommandType.PROFILE, command_name, kwargs
+    return cluster_name, seq, ZclCommandType.PROFILE, command_name, not disable_default_response, kwargs
   else:
     # Cluster command
     if command not in commands:
       raise ValueError('Unknown cluster command {} for cluster "{}"'.format(command, cluster_name))
     command_name, args = commands[command]
     kwargs, _nbytes = _decode_helper(args, data)
-    return cluster_name, seq, ZclCommandType.CLUSTER, command_name, kwargs
+    return cluster_name, seq, ZclCommandType.CLUSTER, command_name, not disable_default_response, kwargs
 
 
 def encode_cluster_command(cluster_name, command_name, seq, direction=0, default_response=True, manufacturer_code=None, **kwargs):

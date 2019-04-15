@@ -410,10 +410,12 @@ def _encode_helper(args, kwargs):
   for arg in args:
     arg = arg.split(':')
     name, datatype = arg[0], arg[1],
-    values = [kwargs[name]]
 
     if name.startswith('n_'):
-      raise ValueError('Unhandled list length for "{}"'.format(arg))
+      name = name[2:]
+      values = [len(kwargs[name])]
+    else:
+      values = [kwargs[name]]
 
     if datatype.startswith('*'):
       datatype = datatype[1:]
@@ -506,14 +508,14 @@ CLUSTERS_BY_NAME = {
   'groups': (0x0004, {
     'add_group': (0x00, ('id:uint16', 'name:string'),),
     'view_group': (0x01, ('id:uint16',),),
-    'get_group_membership': (0x02, ('count:uint8', 'ids:*uint16'),),
+    'get_group_membership': (0x02, ('n_ids:uint8', 'ids:*uint16'),),
     'remove_group': (0x03, ('id:uint16',),),
     'remove_all_groups': (0x04, (),),
     'add_group_if_identifying': (0x05, ('id:uint16', 'name:string'),),
   }, {
     'add_group_response': (0x00, ('status:status8', 'id:uint16',),),
     'view_group_response': (0x01, ('status:status8', 'id:uint16', 'name:string'),),
-    'get_group_membership_response': (0x02, ('capacity:uint8', 'count:uint8', 'ids:*uint16',),),
+    'get_group_membership_response': (0x02, ('capacity:uint8', 'n_ids:uint8', 'ids:*uint16',),),
     'remove_group_response': (0x03, ('status:status8', 'id:uint16',),),
   }, {
     'name_support': (0x0000, 'uint8',),

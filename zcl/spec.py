@@ -581,7 +581,7 @@ CLUSTERS_BY_NAME = {
     'move_to_hue': (0x00, ('hue:uint8', 'dir:enum8:shortest,longest,up,down', 'time:uint16',),),
     'move_hue': (0x01, ('mode:enum8:stop,up,_,down', 'rate:uint8',),),
     'step_hue': (0x02, ('mode:enum8:_,up,_,down', 'size:uint8', 'time:uint8',),),
-    'move_to_satuation': (0x03, ('saturation:uint8', 'dir:enum8:shortest,longest,up,down', 'time:uint16',),),
+    'move_to_saturation': (0x03, ('saturation:uint8', 'dir:enum8:shortest,longest,up,down', 'time:uint16',),),
     'move_saturation': (0x04, ('mode:enum8:stop,up,_,down', 'rate:uint8',),),
     'step_saturation': (0x05, ('mode:enum8:_,up,_,down', 'size:uint8', 'time:uint8',),),
     'move_to_hue_saturation': (0x06, ('hue:uint8', 'saturation:uint8', 'time:uint16',),),

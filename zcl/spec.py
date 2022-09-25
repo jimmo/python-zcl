@@ -80,6 +80,7 @@ class DataType(enum.IntEnum):
   ENUM8 = 0x30
   ENUM16 = 0x31
   CHARACTER_STRING = 0x42
+  EUI64 = 0xf0
 
 
 ANALOG_DATATYPES = set([
@@ -109,6 +110,7 @@ class ZclCommandType(enum.IntEnum):
 class Status(enum.IntEnum):
   SUCCESS = 0x00
   FAILURE = 0x01
+  REQUEST_DENIED = 0x70
   NOT_AUTHORIZED = 0x7E
   RESERVED_FIELD_NOT_ZERO = 0x7F
   MALFORMED_COMMAND = 0x80
@@ -247,8 +249,34 @@ def _encode_simple_descriptor():
 def _decode_read_attr_status(data, i, obj):
   return _decode_helper(('attribute:uint16', 's_status:status8', 'datatype:uint8', 'value:datatype',), data, i)
 
-def _encode_read_attr_status():
+def _encode_read_attr_status(obj):
   pass
+
+
+def _encode_value_field_helper(datatype, value):
+  decode, encode = STRUCT_TYPES[datatype]
+  if not callable(decode):
+    fmt, _nbytes = decode, encode
+    if datatype == 'uint64' and isinstance(value, str):
+      value = int(value, 16)
+    return struct.pack(fmt, value)
+  else:
+    return encode(value)
+
+
+def _decode_write_attr(data, i, obj):
+  return _decode_helper(('attribute:uint16', 'datatype:uint8', 'value:datatype',), data, i)
+
+def _encode_write_attr(obj):
+  return struct.pack('<HB', obj['attribute'], DATATYPES_BY_NAME[obj['datatype']]) + _encode_value_field_helper(obj['datatype'], obj['value'])
+
+
+def _decode_write_attr_status(data, i, obj):
+  # , 'attribute:uint16',
+  return _decode_helper(('status:status8', ), data, i)
+
+def _encode_write_attr_status(obj):
+  return struct.pack('<BH', obj['status'], obj['attribute'])
 
 
 def _decode_datatype(data, i, obj):
@@ -346,12 +374,15 @@ STRUCT_TYPES = {
   'enum16': ('<H', 2,),
   'status8': (_decode_status, _encode_status,),
   'string': (_decode_string, _encode_string,),
+  'EUI64': ('<Q', 8,),
   'simple_descriptor': (_decode_simple_descriptor, _encode_simple_descriptor,),
   'read_attr_status': (_decode_read_attr_status, _encode_read_attr_status,),
   'datatype': (_decode_datatype, _encode_datatype,),
   'attr_reporting_config': (_decode_attr_reporting_config, _encode_attr_reporting_config,),
   'attr_reporting_status': (_decode_attr_reporting_status, _encode_attr_reporting_status,),
   'reported_attribute': (_decode_reported_attribute, _encode_reported_attribute,),
+  'write_attr': (_decode_write_attr, _encode_write_attr,),
+  'write_attr_status': (_decode_write_attr_status, _encode_write_attr_status,),
 }
 
 
@@ -369,6 +400,7 @@ DATATYPE_STRUCT_TYPES = {
   DataType.ENUM8: 'enum8',
   DataType.ENUM16: 'enum16',
   DataType.CHARACTER_STRING: 'string',
+  DataType.EUI64: 'EUI64',
 }
 
 DATATYPES_BY_NAME = {
@@ -385,6 +417,7 @@ DATATYPES_BY_NAME = {
   'enum8': DataType.ENUM8,
   'enum16': DataType.ENUM16,
   'string': DataType.CHARACTER_STRING,
+  'EUI64': DataType.EUI64,
 }
 
 
@@ -450,10 +483,10 @@ PROFILE_COMMANDS_BY_NAME = {
   # ZCL Spec -- "2.5 General Command Frames"
   'read_attributes': (0x00, ('attributes:*uint16',),),
   'read_attributes_response': (0x01, ('attributes:%read_attr_status',),),
-  'write_attributes': (0x02, ('a:*write_attr',),),
-  'write_attributes_undivided': (0x03, ('a:*write_attr',),),
-  'write_attributes_response': (0x04, ('*a:write_attr_status',),),
-  'write_attributes_no_response': (0x05, ('a:*write_attr',),),
+  'write_attributes': (0x02, ('attributes:*write_attr',),),
+  'write_attributes_undivided': (0x03, ('attributes:*write_attr',),),
+  'write_attributes_response': (0x04, ('attributes:%write_attr_status',),),
+  'write_attributes_no_response': (0x05, ('attributes:*write_attr',),),
   'configure_reporting': (0x06, ('configs:*attr_reporting_config',),),
   'configure_reporting_response': (0x07, ('results:%attr_reporting_status',),),
   # 'read_reporting_configuration': (0x08, (),),
@@ -565,6 +598,21 @@ CLUSTERS_BY_NAME = {
   }, {
   }, {
   },),
+  'ias_zone': (0x0500, {
+    'zone_enrol': (0x00, ('enroll_response_code:uint8', 'zone_id:uint8',),),
+  }, {
+    'zone_status_change': (0x00, ('zone_status:uint16', 'extended_status:uint8', 'zone_id:uint8', 'delay:uint16',),),
+    'zone_enrol_request': (0x01, ('zone_type:uint16', 'manufacturer_code:uint16',),),
+  }, {
+    'zone_state': (0x0000, 'uint8',),
+    'zone_type': (0x0001, 'uint16',),
+    'zone_status': (0x0002, 'uint16',),
+
+    'ias_cie_address': (0x0010, 'uint64',),
+    'zone_id': (0x0011, 'uint8',),
+    'number_of_zone_sensitivity_levels_supported': (0x0012, 'uint8',),
+    'current_zone_sensitivity_level': (0x0013, 'uint8',),
+  },),
   'diagnostics': (0x0b05, {
   }, {
   }, {
@@ -659,7 +707,7 @@ def decode_zcl(cluster, data):
   else:
     # Cluster command
     if command not in commands:
-      raise ValueError('Unknown cluster command {} for cluster "{}"'.format(command, cluster_name))
+      raise ValueError('Unknown cluster command {} for cluster "{}" (direction={})'.format(command, cluster_name, direction))
     command_name, args = commands[command]
     kwargs, _nbytes = _decode_helper(args, data)
     return cluster_name, seq, ZclCommandType.CLUSTER, command_name, not disable_default_response, kwargs
